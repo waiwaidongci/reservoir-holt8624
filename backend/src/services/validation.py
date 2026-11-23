@@ -3,6 +3,7 @@ import io
 import math
 from datetime import date
 from src.domain import analysis
+from src.domain.bands import READING_KINDS
 from src.domain.spec import SPEC
 
 
@@ -44,8 +45,36 @@ def cell(field, raw):
     return value
 
 
+def _field(key):
+    return next(item for item in SPEC['fields'] if item['key'] == key)
+
+
+def _reading_row(raw, line_num):
+    """把一行 CSV 规范化成晨检记录，区分实测、满格和缺报。"""
+    kind_cell = raw.get('reading_kind')
+    kind = kind_cell.strip() if isinstance(kind_cell, str) else kind_cell
+    if kind not in READING_KINDS:
+        raise ValueError('读数状态必须为 measured（实测）、full（满格）或 missing（缺报）')
+    level_raw = raw.get('level_m')
+    level_empty = level_raw is None or (isinstance(level_raw, str) and not level_raw.strip())
+    if kind == 'missing':
+        if not level_empty:
+            raise ValueError('缺报行必须留空实测液位')
+        level = None
+    elif level_empty:
+        raise ValueError('实测或满格行必须填写液位；满格行填液位计量程顶读数')
+    else:
+        level = cell(_field('level_m'), level_raw)
+    return {
+        'reservoir_id': cell(_field('reservoir_id'), raw.get('reservoir_id')),
+        'reading_date': cell(_field('reading_date'), raw.get('reading_date')),
+        'level_m': level,
+        'reading_kind': kind,
+    }
+
+
 def parse_rows(text):
-    reader = csv.DictReader(io.StringIO(text.removeprefix('\ufeff'), newline=''), strict=True)
+    reader = csv.DictReader(io.StringIO(text.removeprefix('﻿'), newline=''), strict=True)
     fields = SPEC['fields']
     keys = {field['key'] for field in fields}
     required = {field['key'] for field in fields if field.get('required', True)}
@@ -60,7 +89,7 @@ def parse_rows(text):
             try:
                 if None in raw or any(value is None for value in raw.values()):
                     raise ValueError('工作表的列数与表头不一致')
-                rows.append({field['key']: cell(field, raw.get(field['key'])) for field in fields})
+                rows.append(_reading_row(raw, reader.line_num))
             except ValueError as error:
                 raise ValueError(f'CSV 第 {reader.line_num} 行 · {error}') from None
     except csv.Error:
@@ -76,4 +105,7 @@ def normalize_params(params):
     fields = SPEC['params']
     if set(params) - {field['key'] for field in fields}:
         raise ValueError('存在未知运行参数，请重新打开工作面板')
-    return {field['key']: cell(field, params.get(field['key'], field['default'])) for field in fields}
+    normalized = {field['key']: cell(field, params.get(field['key'], field['default'])) for field in fields}
+    if normalized['gauge_max_m'] > normalized['pool_top_m']:
+        raise ValueError('液位计量程顶不能高于池顶液位')
+    return normalized

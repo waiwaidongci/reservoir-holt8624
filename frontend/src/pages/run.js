@@ -29,6 +29,7 @@ export async function runPage(route, refresh) {
   const form = el('form',{class:'fields','data-testid':'run-form',
     onSubmit:handler(submit,error,async event=>{
       const item = await workspace.start(runRequest(new FormData(event.target),spec));
+      if (item.reused) error.textContent = '同一批读数、限值与核尺已有运行，已打开既有报告，未新增报告。';
       location.hash = `#results/${item.id}`;
     })}, datasetField(datasets,route.id),field({key:'name',label:'运行名称',type:'string',max_length:120},`样本${spec.run}`),
     el('div',{class:'form-grid'},spec.params.map(param=>field(param))),el('div',{class:'actions'},submit),scheduleFields,error);

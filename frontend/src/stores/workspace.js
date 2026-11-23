@@ -14,6 +14,8 @@ export const workspace = {
   start: data => call('/runs', data),
   review: (id, data) => call(`/runs/${id}/review`, data),
   audit: () => call('/audit'),
+  calibrations: reservoirId => call(`/calibrations?reservoir_id=${encodeURIComponent(reservoirId)}`),
+  saveCalibration: data => call('/calibrations', data),
   schedules: () => call('/schedules'),
   deliveries: () => call('/deliveries'),
   schedule: data => call('/schedules', data),

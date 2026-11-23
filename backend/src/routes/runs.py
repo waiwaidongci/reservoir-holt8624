@@ -12,6 +12,7 @@ from src.models.jobs import Run
 from src.models.source import Dataset
 from src.schemas.requests import ReviewRequest, RunRequest
 from src.services.audit import record
+from src.services.snapshots import build_snapshot, fingerprint, find_existing_run, load_calibrations
 from src.services.validation import normalize_params
 from src.utils import views
 from src.utils.wakeup import wake
@@ -34,15 +35,29 @@ def index(db: Session = Depends(connection), actor: User = Depends(current)):
 @router.post('', status_code=202)
 def create(body: RunRequest, db: Session = Depends(connection),
            actor: User = Depends(allow(Role.ADMIN, Role.ANALYST))):
-    if not db.get(Dataset, body.dataset_id):
+    dataset = db.get(Dataset, body.dataset_id)
+    if not dataset:
         raise HTTPException(404, '找不到指定的数据批次')
-    item = Run(name=body.name, dataset_id=body.dataset_id, params=normalize_params(body.params), author=actor.username)
+    params = normalize_params(body.params)
+    reservoir_id = dataset.rows[0]['reservoir_id']
+    calibrations = load_calibrations(db, reservoir_id)
+    snapshot = build_snapshot(dataset, params, calibrations)
+    signature = fingerprint(snapshot)
+    # 同一批读数、限值、核尺与参数重复提交：复用既有运行，不新增报告。
+    existing = find_existing_run(db, signature)
+    if existing:
+        record(db, actor.username, 'analysis.reused', existing.id, fingerprint=signature)
+        db.commit()
+        return {**views.run(existing, detail=True), 'reused': True}
+    item = Run(name=body.name, dataset_id=body.dataset_id, params=params, author=actor.username,
+               fingerprint=signature, input_snapshot=snapshot)
     db.add(item)
     db.flush()
-    record(db, actor.username, 'analysis.queued', item.id, dataset_id=item.dataset_id)
+    record(db, actor.username, 'analysis.queued', item.id, dataset_id=item.dataset_id,
+           fingerprint=signature, calibrations=len(calibrations))
     db.commit()
     wake()
-    return views.run(item, detail=True)
+    return {**views.run(item, detail=True), 'reused': False}
 
 
 @router.get('/{run_id}')

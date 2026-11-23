@@ -29,6 +29,10 @@ class Run(Base):
     name: Mapped[str] = mapped_column(String(120))
     status: Mapped[str] = mapped_column(String(20), default=Status.QUEUED, index=True)
     params: Mapped[dict] = mapped_column(JSON)
+    # 输入指纹（数据集+参数+生效核尺）。同指纹重复提交直接复用既有运行，不新增报告。
+    fingerprint: Mapped[str | None] = mapped_column(String(64), index=True)
+    # 运行时刻的输入快照。旧报告据此永久保留当时的读数、限值与核尺证据。
+    input_snapshot: Mapped[dict | None] = mapped_column(JSON)
     result: Mapped[dict | None] = mapped_column(JSON)
     error: Mapped[str | None] = mapped_column(String(500))
     export_file: Mapped[str | None] = mapped_column(String(100))

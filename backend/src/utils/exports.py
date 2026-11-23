@@ -17,6 +17,8 @@ def write_report(run_id, attempt, result):
     with staging.open('w', encoding='utf-8-sig', newline='') as output:
         writer = csv.writer(output)
         writer.writerow([safe_cell(result['headline'])])
+        if result.get('band_headline'):
+            writer.writerow([safe_cell(result['band_headline'])])
         writer.writerow([safe_cell(result.get('note', ''))])
         for metric in result['metrics']:
             writer.writerow([safe_cell(metric['label']), safe_cell(metric['value']), safe_cell(metric.get('detail', ''))])

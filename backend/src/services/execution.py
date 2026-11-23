@@ -8,6 +8,8 @@ from src.domain.spec import SPEC
 from src.models.jobs import Delivery, Run, Schedule
 from src.models.source import Dataset
 from src.services.audit import record
+from src.services.fingerprint import build_snapshot, fingerprint
+from src.services.snapshots import load_calibrations
 from src.utils.exports import write_report
 from src.utils.time import now
 
@@ -36,8 +38,13 @@ def materialize_due():
                 item.next_at = due + timedelta(days=1)
             else:
                 item.enabled = False
+            dataset = db.get(Dataset, dataset_id)
+            calibrations = load_calibrations(db, dataset.rows[0]['reservoir_id']) if dataset and dataset.rows else []
+            snapshot = build_snapshot(dataset, params, calibrations) if dataset else None
             db.add(Run(dataset_id=dataset_id, schedule_id=item.id, scheduled_at=due,
-                       name=item.name, params=params, author=item.author))
+                       name=item.name, params=params, author=item.author,
+                       fingerprint=fingerprint(snapshot) if snapshot else None,
+                       input_snapshot=snapshot))
 
 
 def claim():
@@ -57,15 +64,22 @@ def claim():
         job.status = Status.RUNNING
         job.attempt += 1
         job.lease_until = stamp + timedelta(minutes=3)
-        records = db.get(Dataset, job.dataset_id).rows
-        return job.id, job.attempt, records, job.params
+        # 优先使用运行时刻冻结的输入快照；兼容历史无快照运行。
+        snapshot = job.input_snapshot
+        if snapshot is None:
+            snapshot = {'readings': db.get(Dataset, job.dataset_id).rows,
+                        'calibrations': [], 'params': job.params,
+                        'limits': {key: job.params[key] for key in
+                                   ('gauge_max_m', 'pool_top_m', 'max_daily_change_m')
+                                   if key in job.params}}
+        return job.id, job.attempt, snapshot, job.params
 
 
 def execute(lease):
-    job_id, attempt, rows, params = lease
+    job_id, attempt, snapshot, params = lease
     result = export = failure = None
     try:
-        result = analyze(rows, params)
+        result = analyze(snapshot, params)
         export = write_report(job_id, attempt, result)
     except ValueError as error:
         failure = str(error)[:500]

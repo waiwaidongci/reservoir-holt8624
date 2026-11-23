@@ -19,6 +19,12 @@ class RunRequest(Request):
     name: str = Field(min_length=1, max_length=120)
     params: dict = Field(default_factory=dict)
 
+class CalibrationRequest(Request):
+    reservoir_id: str = Field(min_length=1, max_length=40)
+    reading_date: str = Field(min_length=8, max_length=10)
+    level_m: float = Field(ge=0, le=20)
+    note: str = Field(default='', max_length=500)
+
 class ReviewRequest(Request):
     review: Review
     note: str = Field(min_length=1, max_length=500)
